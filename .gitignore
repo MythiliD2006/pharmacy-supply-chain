@@ -1,3 +1,18 @@
-.env
-
+# dependencies
 node_modules/
+
+# secrets - never commit these
+.env
+.env.local
+
+# hardhat build output
+contracts/artifacts/
+contracts/cache/
+contracts/deployments/localhost.json
+
+# next.js (later)
+frontend/.next/
+
+# misc
+.DS_Store
+*.log

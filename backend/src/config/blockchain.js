@@ -27,6 +27,7 @@ const TransferStatus = ["Pending", "Confirmed", "Rejected", "Cancelled"];
 
 const provider = new ethers.JsonRpcProvider(requireEnv("RPC_URL"), Number(process.env.CHAIN_ID) || undefined, {
   staticNetwork: true,
+  cacheTimeout: -1, // no request caching, otherwise back-to-back admin txs can reuse a nonce
 });
 provider.pollingInterval = Number(process.env.RPC_POLL_MS || 1000);
 

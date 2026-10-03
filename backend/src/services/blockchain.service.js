@@ -14,6 +14,9 @@ const { computeBatchHash, toUnixSeconds } = require("../utils/batchHash");
 
 const { accessControl, registry, transfer } = contracts;
 
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
 
 function checkAddress(address, field = "address") {
   if (!address || !ethers.isAddress(address)) {
@@ -45,10 +48,18 @@ function requireAdmin() {
   }
 }
 
+// admin transactions are sent one at a time so two requests never grab the same nonce
+let adminQueue = Promise.resolve();
+function queueAdmin(fn) {
+  const run = adminQueue.then(fn, fn);
+  adminQueue = run.catch(() => {});
+  return run;
+}
+
 // sends an admin transaction, waits for it and returns a tx summary
 async function sendAdminTx(method, args) {
   requireAdmin();
-  return wrap(async () => {
+  return queueAdmin(() => wrap(async () => {
     await adminAccessControl[method].staticCall(...args); // fail fast with a readable error
     const tx = await adminAccessControl[method](...args);
     const receipt = await tx.wait();
@@ -58,9 +69,12 @@ async function sendAdminTx(method, args) {
       status: receipt.status === 1 ? "success" : "failed",
       gasUsed: receipt.gasUsed.toString(),
     };
-  });
+  }));
 }
 
+// ---------------------------------------------------------------------------
+// formatters (contract structs -> plain JSON)
+// ---------------------------------------------------------------------------
 
 function formatParticipant(address, p) {
   return {
@@ -111,7 +125,9 @@ function formatTransfer(t) {
   };
 }
 
-
+// ---------------------------------------------------------------------------
+// network
+// ---------------------------------------------------------------------------
 
 async function getNetworkInfo() {
   return wrap(async () => {
@@ -125,7 +141,9 @@ async function getNetworkInfo() {
   });
 }
 
- 
+// ---------------------------------------------------------------------------
+// participants (admin signs these from the backend)
+// ---------------------------------------------------------------------------
 
 async function addParticipant(address, name, role) {
   return sendAdminTx("addParticipant", [checkAddress(address), String(name || "").trim(), toRole(role)]);
@@ -151,14 +169,16 @@ async function getAllParticipants() {
   });
 }
 
-
+/** true if the wallet is registered, active, and (optionally) has the given role */
 async function hasActiveRole(address, role) {
   const p = await getParticipant(address);
   if (!p.registered || !p.active) return false;
   return role ? p.role === role : true;
 }
 
-
+// ---------------------------------------------------------------------------
+// batches
+// ---------------------------------------------------------------------------
 
 async function batchExists(batchId) {
   return wrap(() => registry.batchExists(String(batchId)));
@@ -180,7 +200,13 @@ async function getBatchIds(offset = 0, limit = 50) {
   return wrap(async () => [...(await registry.getBatchIds(offset, limit))]);
 }
 
-
+/**
+ * Everything the customer verification page needs.
+ * status: VERIFIED | UNREGISTERED | EXPIRED | INCONSISTENT
+ *
+ * Pass the off-chain record's hash as `expectedDataHash` to also check
+ * that the database copy matches what was registered on-chain.
+ */
 async function verifyBatch(batchId, expectedDataHash) {
   return wrap(async () => {
     const id = String(batchId).trim();
@@ -235,6 +261,9 @@ async function verifyBatch(batchId, expectedDataHash) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// transfers (read)
+// ---------------------------------------------------------------------------
 
 async function getTransfer(transferId) {
   return wrap(async () => formatTransfer(await transfer.getTransfer(transferId)));
@@ -257,7 +286,14 @@ async function getBatchTransfers(batchId) {
   return getTransfersByIds(await wrap(() => transfer.getBatchTransfers(String(batchId))));
 }
 
-
+// ---------------------------------------------------------------------------
+// validation before the user signs in MetaMask
+//
+// Each function simulates the call as `from` (eth_call). If it would revert,
+// it throws a BlockchainError with a readable message, so bad requests are
+// rejected before any transaction is sent. If it passes, it returns the
+// { to, data } the frontend can pass straight to MetaMask.
+// ---------------------------------------------------------------------------
 
 async function simulate(contract, method, args, from) {
   const sender = checkAddress(from, "sender");
@@ -274,7 +310,10 @@ async function simulate(contract, method, args, from) {
   });
 }
 
-
+/**
+ * data: { batchId, medicineName, manufacturingDate, expiryDate, quantity }
+ * dates can be Date objects, ISO strings or unix seconds
+ */
 async function validateRegisterBatch(from, data) {
   if (!data?.batchId || !data?.medicineName || !data?.quantity) {
     throw new BlockchainError("InvalidBatchData", "batchId, medicineName and quantity are required.", 400);
@@ -306,7 +345,9 @@ async function validateCancelTransfer(from, transferId) {
   return simulate(transfer, "cancelTransfer", [Number(transferId)], from);
 }
 
-
+// ---------------------------------------------------------------------------
+// transaction tracking
+// ---------------------------------------------------------------------------
 
 const ourInterfaces = () => [
   [addresses.AccessControlManager, accessControl.interface],
@@ -314,7 +355,11 @@ const ourInterfaces = () => [
   [addresses.SupplyChainTransfer, transfer.interface],
 ];
 
-
+/**
+ * After the frontend sends a transaction through MetaMask, it posts the hash here.
+ * Waits for it to be mined, checks it was sent to one of our contracts,
+ * and returns the decoded events so they can be saved to MongoDB.
+ */
 async function getTransactionDetails(txHash, { confirmations = 1, timeoutMs = 120000 } = {}) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash || "")) {
     throw new BlockchainError("InvalidTxHash", "Invalid transaction hash.", 400);
@@ -339,7 +384,9 @@ async function getTransactionDetails(txHash, { confirmations = 1, timeoutMs = 12
       if (!entry) continue;
       try {
         const parsed = entry[1].parseLog(log);
-        if (parsed) events.push({ name: parsed.name, args: serializeArgs(parsed) });
+        if (parsed) {
+          events.push({ name: parsed.name, args: serializeArgs(parsed), logIndex: log.index, blockNumber: log.blockNumber });
+        }
       } catch (_) {
         /* not one of ours */
       }
@@ -378,7 +425,9 @@ function serializeArgs(parsed) {
   return out;
 }
 
-
+// ---------------------------------------------------------------------------
+// dashboard
+// ---------------------------------------------------------------------------
 
 async function getStats() {
   return wrap(async () => {

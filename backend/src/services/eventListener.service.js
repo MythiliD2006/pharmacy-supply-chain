@@ -1,6 +1,20 @@
 const { provider, contracts } = require("../config/blockchain");
 const { serializeArgs } = require("./blockchain.service");
 
+/**
+ * Polls the chain for contract events and passes them to `onEvent`, in order.
+ * Used to keep MongoDB in sync with the blockchain (batches, transfers, tx hashes).
+ *
+ * It doesn't touch the database itself — you pass in:
+ *   onEvent(event)             called once per event, in block/log order
+ *   getLastBlock()             returns the last block already processed (or null)
+ *   saveLastBlock(blockNumber) stores progress so a restart continues where it left off
+ *   beforeSync()               optional; return true if the chain was reset and syncing
+ *                              should start again from startBlock
+ *
+ * Polling (instead of contract.on) is used because it survives node restarts
+ * and RPC providers dropping filters.
+ */
 
 const WATCHED = [
   {
@@ -56,6 +70,7 @@ function createEventListener({
   onEvent,
   getLastBlock = async () => null,
   saveLastBlock = async () => {},
+  beforeSync = null,
   startBlock = Number(process.env.START_BLOCK || 0),
   pollIntervalMs = Number(process.env.EVENT_POLL_MS || 4000),
   chunkSize = Number(process.env.LOG_CHUNK_SIZE || 500),
@@ -68,6 +83,7 @@ function createEventListener({
   let running = false;
   let busy = false;
   let lastBlock = null;
+  let lastError = null;
 
   async function syncOnce() {
     if (busy) return 0;
@@ -77,6 +93,11 @@ function createEventListener({
       if (lastBlock === null) {
         const saved = await getLastBlock();
         lastBlock = saved !== null && saved !== undefined ? Number(saved) : startBlock - 1;
+      }
+
+      if (beforeSync && (await beforeSync())) {
+        lastBlock = startBlock - 1;
+        await saveLastBlock(lastBlock);
       }
 
       const head = (await provider.getBlockNumber()) - confirmations;
@@ -98,8 +119,13 @@ function createEventListener({
         lastBlock = to;
         await saveLastBlock(lastBlock);
       }
+      if (lastError) logger.log("[events] sync recovered");
+      lastError = null;
     } catch (err) {
-      logger.error("[events] sync failed:", err.shortMessage || err.message);
+      const msg = err.shortMessage || err.message;
+      // log once per distinct error instead of every poll
+      if (msg !== lastError) logger.error("[events] sync failed:", msg);
+      lastError = msg;
     } finally {
       busy = false;
     }
