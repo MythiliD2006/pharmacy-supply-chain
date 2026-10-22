@@ -17,6 +17,10 @@ const MESSAGES = {
   InvalidBatchData:
     "Invalid batch data. Check the name, quantity, and that the manufacturing date is not in the future and expiry is after it.",
   BatchExpired: "This batch has expired and can't be transferred.",
+  BatchRecalled: "This batch has been recalled by the manufacturer and can't be transferred.",
+  AlreadyRecalled: "This batch has already been recalled.",
+  NotBatchManufacturer: "Only the manufacturer that registered this batch can recall it.",
+  EmptyReason: "A reason is required to recall a batch.",
   NotCurrentHolder: "You are not the current holder of this batch.",
   SenderNotActive: "Your account is disabled.",
   ReceiverNotActive: "The receiver is not an active registered participant.",

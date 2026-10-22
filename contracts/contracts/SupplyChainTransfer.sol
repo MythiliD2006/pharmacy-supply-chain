@@ -47,6 +47,7 @@ contract SupplyChainTransfer {
     error ZeroAddress();
     error BatchNotFound();
     error BatchExpired();
+    error BatchRecalled();
     error NotCurrentHolder();
     error SenderNotActive();
     error ReceiverNotActive();
@@ -69,6 +70,7 @@ contract SupplyChainTransfer {
         if (to == msg.sender) revert SelfTransfer();
         if (!registry.batchExists(batchId)) revert BatchNotFound();
         if (registry.isExpired(batchId)) revert BatchExpired();
+        if (registry.isRecalled(batchId)) revert BatchRecalled();
         if (registry.currentHolderOf(batchId) != msg.sender) revert NotCurrentHolder();
         if (!accessControl.isActive(msg.sender)) revert SenderNotActive();
         if (!accessControl.isActive(to)) revert ReceiverNotActive();
@@ -106,6 +108,9 @@ contract SupplyChainTransfer {
         Transfer storage t = _pending(transferId);
         if (msg.sender != t.to) revert NotReceiver();
         if (!accessControl.isActive(msg.sender)) revert ReceiverNotActive();
+        // the batch may have expired or been recalled while the request was pending
+        if (registry.isExpired(t.batchId)) revert BatchExpired();
+        if (registry.isRecalled(t.batchId)) revert BatchRecalled();
         // holder could not have changed while pending, but re-check to be safe
         if (registry.currentHolderOf(t.batchId) != t.from) revert NotCurrentHolder();
 

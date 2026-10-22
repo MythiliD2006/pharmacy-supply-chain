@@ -2,7 +2,9 @@
 
 import { cn } from "@/lib/utils";
 
-type Status = "genuine" | "expired" | "invalid" | "pending" | "confirmed" | "rejected" | "cancelled";
+type Status =
+  | "genuine" | "expired" | "invalid" | "pending" | "confirmed" | "rejected" | "cancelled"
+  | "recalled" | "verified" | "inconsistent" | "unregistered";
 
 const statusMap: Record<Status, { label: string; className: string; dot: string }> = {
   genuine:   { label: "Genuine",   className: "pill pill-genuine",  dot: "bg-emerald-500" },
@@ -12,6 +14,11 @@ const statusMap: Record<Status, { label: string; className: string; dot: string 
   confirmed: { label: "Confirmed", className: "pill pill-genuine",  dot: "bg-emerald-500" },
   rejected:  { label: "Rejected",  className: "pill pill-invalid",  dot: "bg-rose-500" },
   cancelled: { label: "Cancelled", className: "pill pill-expired",  dot: "bg-amber-500" },
+  recalled:  { label: "Recalled",  className: "pill pill-invalid",  dot: "bg-rose-500" },
+  // verification statuses from the backend (VERIFIED, INCONSISTENT, UNREGISTERED)
+  verified:     { label: "Verified",     className: "pill pill-genuine", dot: "bg-emerald-500" },
+  inconsistent: { label: "Inconsistent", className: "pill pill-invalid", dot: "bg-rose-500" },
+  unregistered: { label: "Unregistered", className: "pill pill-invalid", dot: "bg-rose-500" },
 };
 
 interface StatusPillProps {

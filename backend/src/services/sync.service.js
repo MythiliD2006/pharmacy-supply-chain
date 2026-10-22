@@ -29,6 +29,7 @@ const EVENT_ACTION = {
   AdminTransferred: { action: "transferAdmin", actor: (a) => a.previousAdmin },
   BatchRegistered: { action: "registerBatch", actor: (a) => a.manufacturer },
   CustodyTransferred: { action: "confirmTransfer", actor: (a) => a.to, onInsertOnly: true },
+  BatchRecalled: { action: "recallBatch", actor: (a) => a.manufacturer },
   TransferRequested: { action: "requestTransfer", actor: (a) => a.from },
   TransferConfirmed: { action: "confirmTransfer", actor: (a) => a.to },
   TransferRejected: { action: "rejectTransfer", actor: (a) => a.to },
@@ -127,6 +128,21 @@ const handlers = {
     await Batch.updateOne(
       { batchId, holderEventPos: { $lt: pos(e) } },
       { $set: { currentHolder: to, holderEventPos: pos(e) } }
+    );
+  },
+
+  async BatchRecalled(e) {
+    const { batchId, reason } = e.args;
+    await Batch.updateOne(
+      { batchId },
+      {
+        $set: {
+          recalled: true,
+          recallReason: reason,
+          recalledAt: toDate(e.timestamp),
+          recallTxHash: e.txHash,
+        },
+      }
     );
   },
 

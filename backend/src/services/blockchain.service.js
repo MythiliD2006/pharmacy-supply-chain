@@ -196,13 +196,21 @@ async function getBatchHistory(batchId) {
   return wrap(async () => (await registry.getCustodyHistory(String(batchId))).map(formatCustody));
 }
 
+/** { recalled, reason, recalledAt } */
+async function getRecall(batchId) {
+  return wrap(async () => {
+    const r = await registry.getRecall(String(batchId));
+    return { recalled: r.recalled, reason: r.reason, recalledAt: toIso(r.recalledAt) };
+  });
+}
+
 async function getBatchIds(offset = 0, limit = 50) {
   return wrap(async () => [...(await registry.getBatchIds(offset, limit))]);
 }
 
 /**
  * Everything the customer verification page needs.
- * status: VERIFIED | UNREGISTERED | EXPIRED | INCONSISTENT
+ * status: VERIFIED | UNREGISTERED | RECALLED | EXPIRED | INCONSISTENT
  *
  * Pass the off-chain record's hash as `expectedDataHash` to also check
  * that the database copy matches what was registered on-chain.
@@ -221,7 +229,11 @@ async function verifyBatch(batchId, expectedDataHash) {
       };
     }
 
-    const [batch, history] = await Promise.all([registry.getBatch(id), registry.getCustodyHistory(id)]);
+    const [batch, history, recall] = await Promise.all([
+      registry.getBatch(id),
+      registry.getCustodyHistory(id),
+      registry.getRecall(id),
+    ]);
     const holder = await accessControl.getParticipant(r.currentHolder);
     const manufacturer = await accessControl.getParticipant(batch.manufacturer);
 
@@ -230,7 +242,10 @@ async function verifyBatch(batchId, expectedDataHash) {
 
     let status = "VERIFIED";
     let message = "Genuine batch with a valid supply-chain history.";
-    if (!r.historyValid || dataHashValid === false) {
+    if (r.recalled) {
+      status = "RECALLED";
+      message = `This batch was recalled by the manufacturer${recall.reason ? ` (reason: ${recall.reason})` : ""}. Do not use it.`;
+    } else if (!r.historyValid || dataHashValid === false) {
       status = "INCONSISTENT";
       message =
         dataHashValid === false
@@ -247,6 +262,8 @@ async function verifyBatch(batchId, expectedDataHash) {
       message,
       registered: true,
       expired: r.expired,
+      recalled: r.recalled,
+      recall: r.recalled ? { reason: recall.reason, recalledAt: toIso(recall.recalledAt) } : null,
       historyValid: r.historyValid,
       dataHashValid,
       batch: { ...formatBatch(batch), manufacturerName: manufacturer.name },
@@ -331,6 +348,10 @@ async function validateRegisterBatch(from, data) {
 
 async function validateRequestTransfer(from, batchId, to) {
   return simulate(transfer, "requestTransfer", [String(batchId).trim(), checkAddress(to, "receiver")], from);
+}
+
+async function validateRecallBatch(from, batchId, reason) {
+  return simulate(registry, "recallBatch", [String(batchId).trim(), String(reason || "").trim()], from);
 }
 
 async function validateConfirmTransfer(from, transferId) {
@@ -431,12 +452,13 @@ function serializeArgs(parsed) {
 
 async function getStats() {
   return wrap(async () => {
-    const [batches, participants, transfers, confirmed, rejected] = await Promise.all([
+    const [batches, participants, transfers, confirmed, rejected, recalled] = await Promise.all([
       registry.batchCount(),
       accessControl.participantCount(),
       transfer.transferCount(),
       transfer.confirmedCount(),
       transfer.rejectedCount(),
+      registry.recalledCount(),
     ]);
     return {
       totalBatches: Number(batches),
@@ -444,6 +466,7 @@ async function getStats() {
       totalTransfers: Number(transfers),
       confirmedTransfers: Number(confirmed),
       rejectedTransfers: Number(rejected),
+      recalledBatches: Number(recalled),
     };
   });
 }
@@ -463,6 +486,7 @@ module.exports = {
   getBatch,
   getBatchHistory,
   getBatchIds,
+  getRecall,
   verifyBatch,
   // transfers
   getTransfer,
@@ -472,6 +496,7 @@ module.exports = {
   // validation before signing
   validateRegisterBatch,
   validateRequestTransfer,
+  validateRecallBatch,
   validateConfirmTransfer,
   validateRejectTransfer,
   validateCancelTransfer,

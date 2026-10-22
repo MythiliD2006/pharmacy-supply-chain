@@ -23,6 +23,7 @@ const stats = asyncHandler(async (_req, res) => {
   const [
     totalBatches,
     expiredBatches,
+    recalledBatches,
     participantsTotal,
     participantsActive,
     participantsByRole,
@@ -36,6 +37,7 @@ const stats = asyncHandler(async (_req, res) => {
   ] = await Promise.all([
     Batch.countDocuments({ chainStatus: "confirmed" }),
     Batch.countDocuments({ chainStatus: "confirmed", expiryDate: { $lt: now } }),
+    Batch.countDocuments({ chainStatus: "confirmed", recalled: true }),
     Participant.countDocuments({}),
     Participant.countDocuments({ active: true }),
     countBy(Participant, "role"),
@@ -54,7 +56,7 @@ const stats = asyncHandler(async (_req, res) => {
   res.json({
     success: true,
     data: {
-      batches: { total: totalBatches, expired: expiredBatches },
+      batches: { total: totalBatches, expired: expiredBatches, recalled: recalledBatches },
       participants: { total: participantsTotal, active: participantsActive, byRole: participantsByRole },
       transfers: { total: totalTransfers, byStatus: transfersByStatus },
       verifications: {
@@ -76,6 +78,7 @@ const batches = asyncHandler(async (req, res) => {
     const rx = new RegExp(escapeRegex(req.query.search), "i");
     filter.$or = [{ batchId: rx }, { medicineName: rx }, { manufacturerName: rx }];
   }
+  if (req.query.recalled !== undefined) filter.recalled = req.query.recalled === "true";
   const result = await paginate(Batch, filter, req.query, { sort: { registeredAt: -1 } });
   const holders = await Participant.find({ walletAddress: { $in: result.items.map((b) => b.currentHolder) } })
     .select("walletAddress name role")
@@ -123,6 +126,34 @@ const verifications = asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 });
 
+// GET /api/admin/verifications/suspicious?hours=24&min=25
+// batches whose QR code was scanned unusually often (possible copied codes)
+const suspiciousScans = asyncHandler(async (req, res) => {
+  const hours = Math.min(Number(req.query.hours) || Number(process.env.SCAN_WINDOW_HOURS) || 24, 24 * 30);
+  const min = Number(req.query.min) || Number(process.env.SCAN_WARNING_THRESHOLD) || 25;
+  const since = new Date(Date.now() - hours * 3600 * 1000);
+  const rows = await VerificationLog.aggregate([
+    { $match: { createdAt: { $gte: since } } },
+    { $group: { _id: "$batchId", scans: { $sum: 1 }, ips: { $addToSet: "$ip" }, lastScan: { $max: "$createdAt" } } },
+    { $match: { scans: { $gt: min } } },
+    { $sort: { scans: -1 } },
+    { $limit: 100 },
+  ]);
+  res.json({
+    success: true,
+    data: {
+      hours,
+      threshold: min,
+      items: rows.map((r) => ({
+        batchId: r._id,
+        scans: r.scans,
+        uniqueDevices: r.ips.filter(Boolean).length,
+        lastScan: r.lastScan,
+      })),
+    },
+  });
+});
+
 // GET /api/admin/sync
 const sync = asyncHandler(async (_req, res) => {
   res.json({ success: true, data: await getSyncStatus() });
@@ -139,4 +170,4 @@ const createAdmin = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: { user: user.toJSON() } });
 });
 
-module.exports = { stats, batches, transfers, transactions, verifications, sync, createAdmin };
+module.exports = { stats, batches, transfers, transactions, verifications, suspiciousScans, sync, createAdmin };

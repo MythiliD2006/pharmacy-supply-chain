@@ -106,12 +106,30 @@ export interface Batch {
   currentHolderName?: string | null;
   currentHolderRole?: string | null;
   chainStatus?: "pending" | "confirmed";
-  status?: "genuine" | "expired" | "invalid" | "pending";
+  status?: "genuine" | "expired" | "invalid" | "pending" | "recalled";
   registerTxHash?: string | null;
   registerBlock?: number | null;
   registeredAt?: string | null;
   expired?: boolean;
+  recalled?: boolean;
+  recallReason?: string;
+  recalledAt?: string | null;
+  recallTxHash?: string | null;
   txHash?: string; // compatibility alias
+}
+
+export interface RecallInfo {
+  reason: string;
+  recalledAt: string | null;
+}
+
+export interface ScanWarning {
+  totalScans: number;
+  recentScans: number;
+  uniqueDevices: number;
+  windowHours: number;
+  suspicious: boolean;
+  message: string | null;
 }
 
 export interface Transfer {
@@ -170,10 +188,13 @@ export interface CustodyRecord {
 
 export interface VerifyResult {
   batchId: string;
-  status: "VERIFIED" | "UNREGISTERED" | "EXPIRED" | "INCONSISTENT" | "genuine" | "expired" | "invalid";
+  status: "VERIFIED" | "UNREGISTERED" | "RECALLED" | "EXPIRED" | "INCONSISTENT";
   message: string;
   registered: boolean;
   expired: boolean;
+  recalled?: boolean;
+  recall?: RecallInfo | null;
+  scanWarning?: ScanWarning | null;
   historyValid: boolean;
   dataHashValid?: boolean | null;
   batch?: Batch;
@@ -205,7 +226,7 @@ export interface PreparedTx {
 }
 
 export interface AdminStats {
-  batches: { total: number; expired: number };
+  batches: { total: number; expired: number; recalled?: number };
   participants: { total: number; active: number; byRole: Record<string, number> };
   transfers: { total: number; byStatus: Record<string, number> };
   verifications: { total: number; byStatus: Record<string, number>; verifiedMedicines: number };
@@ -270,12 +291,16 @@ export const batchApi = {
         transfers: Transfer[];
         pendingTransfer: Transfer | null;
         isHolder: boolean;
+        isManufacturer?: boolean;
+        recall?: RecallInfo | null;
         qrCode: string;
         verifyUrl: string;
       }>
     >(`/batches/${encodeURIComponent(batchId)}`),
   prepare: (data: RegisterBatchPayload) =>
     api.post<ApiResponse<PreparedTx>>("/batches/prepare", data),
+  prepareRecall: (batchId: string, reason: string) =>
+    api.post<ApiResponse<PreparedTx>>(`/batches/${encodeURIComponent(batchId)}/recall/prepare`, { reason }),
   getQr: (batchId: string) =>
     api.get<ApiResponse<{ qrCode: string; verifyUrl: string }>>(`/batches/${encodeURIComponent(batchId)}/qr?format=dataurl`),
 };
@@ -339,6 +364,14 @@ export const adminApi = {
     api.get<ApiResponse<PaginatedResult<any>>>("/admin/transactions", { params }),
   verifications: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<PaginatedResult<any>>>("/admin/verifications", { params }),
+  suspiciousScans: (params?: { hours?: number; min?: number }) =>
+    api.get<
+      ApiResponse<{
+        hours: number;
+        threshold: number;
+        items: { batchId: string; scans: number; uniqueDevices: number; lastScan: string }[];
+      }>
+    >("/admin/verifications/suspicious", { params }),
   sync: () => api.get<ApiResponse<any>>("/admin/sync"),
 };
 

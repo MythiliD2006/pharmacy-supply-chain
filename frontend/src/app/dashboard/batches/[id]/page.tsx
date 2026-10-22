@@ -1,15 +1,18 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { use, useCallback, useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Package, Calendar, Hash, Building2,
   Download, Share2, ExternalLink, ArrowLeftRight,
-  Factory, Truck, Store, Pill, AlertCircle, Clock
+  Factory, Truck, Store, Pill, AlertCircle, Clock, Ban, X
 } from "lucide-react";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { batchApi, Batch, Transfer } from "@/lib/api";
+import { toast } from "sonner";
+import { batchApi, transactionApi, Batch, Transfer, RecallInfo, getErrorMessage } from "@/lib/api";
+import { sendMetaMaskTransaction, hasMetaMask } from "@/lib/web3";
+import { useAuth } from "@/context/AuthContext";
 import { HashChip } from "@/components/ui/HashChip";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -38,9 +41,19 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const [isManufacturer, setIsManufacturer] = useState(false);
+  const [recall, setRecall] = useState<RecallInfo | null>(null);
+  const [apiStatus, setApiStatus] = useState("");
+  const [showRecall, setShowRecall] = useState(false);
+  const [recallReason, setRecallReason] = useState("");
+  const [recalling, setRecalling] = useState(false);
+  const [recallStep, setRecallStep] = useState("");
 
-  useEffect(() => {
-    batchApi
+  const { user } = useAuth();
+  const userWallet = user?.participant?.walletAddress;
+
+  const load = useCallback(() => {
+    return batchApi
       .get(decodedId)
       .then((res) => {
         if (res.data?.success && res.data.data) {
@@ -51,6 +64,9 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           setPendingTransfer(d.pendingTransfer || null);
           setIsHolder(Boolean(d.isHolder));
           setStatusMessage(d.statusMessage || "");
+          setIsManufacturer(Boolean(d.isManufacturer));
+          setRecall(d.recall || null);
+          setApiStatus(d.status || "");
 
           if (d.qrCode) {
             setQrDataUrl(d.qrCode);
@@ -68,6 +84,53 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
       .finally(() => setLoading(false));
   }, [decodedId]);
 
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRecall = async () => {
+    const reason = recallReason.trim();
+    if (reason.length < 3) {
+      toast.error("Please give a reason for the recall (at least 3 characters).");
+      return;
+    }
+    if (!userWallet) {
+      toast.error("Your account has no linked wallet.");
+      return;
+    }
+    if (!hasMetaMask()) {
+      toast.error("MetaMask is required to sign the recall.");
+      return;
+    }
+    setRecalling(true);
+    try {
+      setRecallStep("Checking the recall...");
+      const prep = await batchApi.prepareRecall(decodedId, reason);
+      if (!prep.data?.success || !prep.data.data?.tx) {
+        throw new Error(prep.data?.error?.message || "Could not prepare the recall");
+      }
+
+      setRecallStep("Sign the recall in MetaMask...");
+      const hash = await sendMetaMaskTransaction(prep.data.data.tx, userWallet);
+
+      setRecallStep("Waiting for the blockchain...");
+      const txRes = await transactionApi.submit(hash);
+      if (!txRes.data?.success) {
+        throw new Error(txRes.data?.error?.message || "Recall transaction failed");
+      }
+
+      toast.success("Batch recalled. It can no longer be transferred and every scan will show it as recalled.");
+      setShowRecall(false);
+      setRecallReason("");
+      await load();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to recall batch"));
+    } finally {
+      setRecalling(false);
+      setRecallStep("");
+    }
+  };
+
   const downloadQR = () => {
     if (!qrDataUrl) return;
     const a = document.createElement("a");
@@ -76,11 +139,20 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     a.click();
   };
 
+  const isRecalled = Boolean(batch?.recalled || recall || apiStatus === "RECALLED");
+
   const status = batch
-    ? isExpired(batch.expiryDate)
+    ? isRecalled
+      ? "recalled"
+      : apiStatus === "INCONSISTENT"
+      ? "inconsistent"
+      : isExpired(batch.expiryDate)
       ? "expired"
       : (batch.status ?? "genuine")
     : "pending";
+
+  const recallReasonText = recall?.reason || batch?.recallReason || "";
+  const recalledAt = recall?.recalledAt || batch?.recalledAt || null;
 
   const txHash = batch?.registerTxHash || batch?.txHash;
 
@@ -100,8 +172,13 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             {batch && <HashChip value={batch.batchId} truncate={false} label="Batch ID" />}
           </div>
           <div className="flex items-center gap-2">
-            {batch && <StatusPill status={status as "genuine" | "expired" | "invalid"} />}
-            {isHolder && !pendingTransfer && (
+            {batch && <StatusPill status={status} />}
+            {isManufacturer && !isRecalled && (
+              <button onClick={() => setShowRecall(true)} className="btn btn-secondary text-sm text-rose-600">
+                <Ban size={15} /> Recall Batch
+              </button>
+            )}
+            {isHolder && !pendingTransfer && !isRecalled && !isExpired(batch?.expiryDate ?? 0) && (
               <Link href="/dashboard/transfers/new" className="btn btn-primary text-sm">
                 <ArrowLeftRight size={15} /> Transfer Batch
               </Link>
@@ -109,6 +186,37 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       </div>
+
+      {batch && isRecalled && (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-sm">
+          <Ban size={18} className="shrink-0 mt-0.5 text-rose-600" />
+          <div className="space-y-1">
+            <div className="font-semibold">This batch has been recalled by the manufacturer</div>
+            {recallReasonText && <div>Reason: {recallReasonText}</div>}
+            {recalledAt && <div className="text-xs opacity-80">Recalled on {formatDate(recalledAt)}</div>}
+            <div className="text-xs opacity-80">
+              It can no longer be transferred, and customers who scan it are told not to use it.
+            </div>
+            {batch.recallTxHash && (
+              <a
+                href={getEtherscanUrl(batch.recallTxHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] underline"
+              >
+                <ExternalLink size={10} /> Recall transaction
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!isRecalled && apiStatus === "INCONSISTENT" && statusMessage && (
+        <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-sm">
+          <AlertCircle size={16} className="shrink-0" />
+          <span>{statusMessage}</span>
+        </div>
+      )}
 
       {pendingTransfer && (
         <div className="flex items-center justify-between p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-sm">
@@ -327,6 +435,74 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       )}
+
+      {/* Recall dialog */}
+      <AnimatePresence>
+        {showRecall && batch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={() => !recalling && setShowRecall(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="card p-6 w-full max-w-md space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-display font-semibold text-lg flex items-center gap-2">
+                  <Ban size={18} className="text-rose-500" /> Recall {batch.batchId}
+                </h2>
+                <button
+                  onClick={() => setShowRecall(false)}
+                  disabled={recalling}
+                  className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-sm text-[var(--text-secondary)]">
+                Recalling is permanent and is written to the blockchain. The batch can no longer be transferred,
+                any pending transfer can only be rejected or cancelled, and every customer scan will show it as recalled.
+              </p>
+              <div>
+                <label htmlFor="recall-reason" className="text-xs font-semibold text-[var(--text-secondary)]">
+                  Reason for recall
+                </label>
+                <textarea
+                  id="recall-reason"
+                  value={recallReason}
+                  onChange={(e) => setRecallReason(e.target.value)}
+                  maxLength={300}
+                  rows={3}
+                  placeholder="e.g. Failed stability test, contaminated lot, labelling error"
+                  className="input w-full mt-1"
+                  disabled={recalling}
+                />
+                <div className="text-[11px] text-[var(--text-tertiary)] text-right">{recallReason.length}/300</div>
+              </div>
+              {recallStep && <p className="text-xs text-[var(--text-secondary)]">{recallStep}</p>}
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setShowRecall(false)} disabled={recalling} className="btn btn-secondary text-sm">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRecall}
+                  disabled={recalling || recallReason.trim().length < 3}
+                  className="btn btn-primary text-sm bg-rose-600 hover:bg-rose-700"
+                >
+                  <Ban size={14} /> {recalling ? "Recalling..." : "Recall batch"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

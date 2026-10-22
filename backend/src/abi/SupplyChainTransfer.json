@@ -27,6 +27,11 @@
   },
   {
     "inputs": [],
+    "name": "BatchRecalled",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidReceiverRole",
     "type": "error"
   },

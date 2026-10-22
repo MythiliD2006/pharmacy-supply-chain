@@ -61,7 +61,43 @@ const prepare = asyncHandler(async (req, res) => {
   }
 });
 
-// GET /api/batches?scope=holding|manufactured|all&search=
+/**
+ * POST /api/batches/:batchId/recall/prepare   (Manufacturer of that batch)
+ * Body: { reason }
+ * Simulates recallBatch() as the manufacturer and returns the tx for MetaMask.
+ * Once recalled, the contracts block every further transfer and every
+ * customer scan shows the batch as RECALLED.
+ */
+const prepareRecall = asyncHandler(async (req, res) => {
+  const { batchId } = req.params;
+  const { reason } = req.body;
+  const wallet = req.user.participant.walletAddress;
+
+  try {
+    const batch = await Batch.findOne({ batchId, chainStatus: "confirmed" }).lean();
+    if (!batch) throw ApiError.notFound("Batch not found.", "BatchNotFound");
+    if (batch.manufacturer.toLowerCase() !== wallet.toLowerCase()) {
+      throw ApiError.forbidden("Only the manufacturer that registered this batch can recall it.", "NotBatchManufacturer");
+    }
+    if (batch.recalled) throw ApiError.conflict("This batch has already been recalled.", "AlreadyRecalled");
+
+    const validation = await bc.validateRecallBatch(wallet, batchId, reason);
+    res.json({
+      success: true,
+      data: {
+        tx: validation.tx,
+        next: "Send `tx` with MetaMask, then POST the transaction hash to /api/transactions",
+      },
+    });
+  } catch (err) {
+    if (err.status && err.status < 500) {
+      await logRejected({ action: "recallBatch", user: req.user, err, batchId });
+    }
+    throw err;
+  }
+});
+
+// GET /api/batches?scope=holding|manufactured|all&search=&recalled=true
 const list = asyncHandler(async (req, res) => {
   const { scope, search } = req.query;
   const filter = { chainStatus: "confirmed" };
@@ -77,6 +113,7 @@ const list = asyncHandler(async (req, res) => {
     const rx = new RegExp(escapeRegex(search), "i");
     filter.$or = [{ batchId: rx }, { medicineName: rx }];
   }
+  if (req.query.recalled !== undefined) filter.recalled = req.query.recalled === true || req.query.recalled === "true";
 
   const result = await paginate(Batch, filter, req.query, { sort: { registeredAt: -1 } });
   const now = Date.now();
@@ -120,6 +157,8 @@ const getOne = asyncHandler(async (req, res) => {
       transfers,
       pendingTransfer,
       isHolder: Boolean(wallet && wallet === batch.currentHolder),
+      isManufacturer: Boolean(wallet && wallet.toLowerCase() === batch.manufacturer.toLowerCase()),
+      recall: verification.recall || null,
       qrCode,
       verifyUrl: qr.verifyUrl(batchId),
     },
@@ -141,4 +180,4 @@ const getQr = asyncHandler(async (req, res) => {
   res.send(png);
 });
 
-module.exports = { prepare, list, getOne, getQr };
+module.exports = { prepare, prepareRecall, list, getOne, getQr };

@@ -9,6 +9,7 @@ router.use(authenticate);
 
 router.post("/prepare", requireParticipant("Manufacturer"), validate(v.prepare), c.prepare);
 router.get("/", validate(v.list), c.list);
+router.post("/:batchId/recall/prepare", requireParticipant("Manufacturer"), validate(v.recall), c.prepareRecall);
 router.get("/:batchId/qr", validate(v.qr), c.getQr);
 router.get("/:batchId", validate(v.batchIdParam), c.getOne);
 

@@ -12,6 +12,11 @@
   },
   {
     "inputs": [],
+    "name": "AlreadyRecalled",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "BatchAlreadyExists",
     "type": "error"
   },
@@ -22,12 +27,22 @@
   },
   {
     "inputs": [],
+    "name": "EmptyReason",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidBatchData",
     "type": "error"
   },
   {
     "inputs": [],
     "name": "NotAdmin",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotBatchManufacturer",
     "type": "error"
   },
   {
@@ -49,6 +64,37 @@
     "inputs": [],
     "name": "ZeroAddress",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "batchId",
+        "type": "string"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "batchKey",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "manufacturer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "BatchRecalled",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -345,12 +391,98 @@
         "type": "string"
       }
     ],
+    "name": "getRecall",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "recalled",
+            "type": "bool"
+          },
+          {
+            "internalType": "string",
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "recalledAt",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct BatchRegistry.RecallInfo",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "batchId",
+        "type": "string"
+      }
+    ],
     "name": "isExpired",
     "outputs": [
       {
         "internalType": "bool",
         "name": "",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "batchId",
+        "type": "string"
+      }
+    ],
+    "name": "isRecalled",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "batchId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "recallBatch",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "recalledCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -494,6 +626,11 @@
             "internalType": "uint256",
             "name": "transferCount",
             "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "recalled",
+            "type": "bool"
           }
         ],
         "internalType": "struct BatchRegistry.VerificationResult",

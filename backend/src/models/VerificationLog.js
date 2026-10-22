@@ -6,7 +6,7 @@ const verificationLogSchema = new mongoose.Schema(
     batchId: { type: String, required: true },
     status: {
       type: String,
-      enum: ["VERIFIED", "UNREGISTERED", "EXPIRED", "INCONSISTENT"],
+      enum: ["VERIFIED", "UNREGISTERED", "EXPIRED", "RECALLED", "INCONSISTENT"],
       required: true,
     },
     ip: { type: String, default: null },
@@ -16,6 +16,6 @@ const verificationLogSchema = new mongoose.Schema(
 );
 
 verificationLogSchema.index({ status: 1 });
-verificationLogSchema.index({ batchId: 1 });
+verificationLogSchema.index({ batchId: 1, createdAt: -1 });
 
 module.exports = mongoose.model("VerificationLog", verificationLogSchema);

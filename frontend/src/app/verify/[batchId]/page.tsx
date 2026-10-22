@@ -6,7 +6,7 @@ import {
   ShieldCheck, ShieldX, AlertTriangle, Clock,
   Package, Calendar, Hash, Building2, ArrowLeft,
   ExternalLink, Share2, QrCode, CheckCircle, XCircle,
-  Factory, Truck, Store, Pill, ChevronRight
+  Factory, Truck, Store, Pill, ChevronRight, Ban, ScanLine
 } from "lucide-react";
 import Link from "next/link";
 import { verifyApi, VerifyResult } from "@/lib/api";
@@ -17,27 +17,44 @@ import { formatDate, formatDateTime, roleName, getEtherscanUrl } from "@/lib/uti
 import { Navbar } from "@/components/layout/Navbar";
 import { toast } from "sonner";
 
-type VerifyStatus = "genuine" | "expired" | "invalid" | "pending";
+// The five results from the backend (VERIFIED, EXPIRED, RECALLED, INCONSISTENT, UNREGISTERED)
+type VerifyStatus = "verified" | "expired" | "recalled" | "inconsistent" | "unregistered" | "pending";
 
-const roleIcons: Record<number, React.ReactNode> = {
-  1: <Factory size={18} className="text-emerald-500" />,
-  2: <Truck size={18} className="text-sky-500" />,
-  3: <Store size={18} className="text-violet-500" />,
-  4: <Pill size={18} className="text-rose-500" />,
+// backend sends role names ("Distributor"); keep numeric keys for older responses
+const roleIcons: Record<string, React.ReactNode> = {
+  "1": <Factory size={18} className="text-emerald-500" />,
+  "2": <Truck size={18} className="text-sky-500" />,
+  "3": <Store size={18} className="text-violet-500" />,
+  "4": <Pill size={18} className="text-rose-500" />,
+  Manufacturer: <Factory size={18} className="text-emerald-500" />,
+  Distributor: <Truck size={18} className="text-sky-500" />,
+  Wholesaler: <Store size={18} className="text-violet-500" />,
+  Pharmacy: <Pill size={18} className="text-rose-500" />,
 };
 
 function getStatus(result: VerifyResult): VerifyStatus {
-  if (!result.registered) return "invalid";
-  if (result.expired) return "expired";
-  if (!result.historyValid) return "invalid";
-  return "genuine";
+  switch (String(result.status).toUpperCase()) {
+    case "VERIFIED":
+      return "verified";
+    case "EXPIRED":
+      return "expired";
+    case "RECALLED":
+      return "recalled";
+    case "INCONSISTENT":
+      return "inconsistent";
+    default:
+      return "unregistered";
+  }
 }
 
-const statusConfig = {
-  genuine: {
+const statusConfig: Record<
+  VerifyStatus,
+  { icon: React.ReactNode; title: string; subtitle: string; bg: string; border: string; glow: string }
+> = {
+  verified: {
     icon: <ShieldCheck size={48} className="text-emerald-500" />,
     title: "Genuine Medicine",
-    subtitle: "This batch is verified on the blockchain",
+    subtitle: "All checks passed. This batch is verified on the blockchain",
     bg: "from-emerald-500/10 to-teal-500/5",
     border: "border-emerald-500/20",
     glow: "0 0 40px rgba(20,184,166,0.2)",
@@ -50,10 +67,26 @@ const statusConfig = {
     border: "border-amber-500/20",
     glow: "0 0 40px rgba(245,158,11,0.2)",
   },
-  invalid: {
+  recalled: {
+    icon: <Ban size={48} className="text-rose-500" />,
+    title: "Batch Recalled",
+    subtitle: "The manufacturer has withdrawn this batch. Do not use this medicine",
+    bg: "from-rose-500/10 to-pink-500/5",
+    border: "border-rose-500/20",
+    glow: "0 0 40px rgba(244,63,94,0.2)",
+  },
+  inconsistent: {
     icon: <ShieldX size={48} className="text-rose-500" />,
-    title: "Invalid / Unverified",
-    subtitle: "This batch could not be verified on-chain",
+    title: "Inconsistent Record",
+    subtitle: "The batch history or data does not match the blockchain record",
+    bg: "from-rose-500/10 to-pink-500/5",
+    border: "border-rose-500/20",
+    glow: "0 0 40px rgba(244,63,94,0.2)",
+  },
+  unregistered: {
+    icon: <ShieldX size={48} className="text-rose-500" />,
+    title: "Not Registered",
+    subtitle: "This batch was not found on the blockchain. It may be counterfeit",
     bg: "from-rose-500/10 to-pink-500/5",
     border: "border-rose-500/20",
     glow: "0 0 40px rgba(244,63,94,0.2)",
@@ -84,7 +117,9 @@ export default function VerifyResultPage({
     const run = async () => {
       try {
         const res = await verifyApi.verify(decodedId);
-        setResult(res.data);
+        // the API wraps the result as { success, data }
+        if (!res.data?.success || !res.data.data) throw new Error("Bad response");
+        setResult(res.data.data);
       } catch {
         setError("Could not reach the verification service. Try again later.");
       } finally {
@@ -109,6 +144,7 @@ export default function VerifyResultPage({
 
   const status = result ? getStatus(result) : "pending";
   const cfg = statusConfig[status];
+  const history = result ? result.history ?? result.custodyHistory ?? [] : [];
 
   return (
     <div className="site-grid-surface min-h-screen flex flex-col">
@@ -212,14 +248,14 @@ export default function VerifyResultPage({
                   transition={{ type: "spring", stiffness: 400, damping: 20, delay: 0.15 }}
                   className="flex justify-center mb-4"
                 >
-                  {status === "genuine" ? (
+                  {status === "verified" ? (
                     <div className="relative">
                       <div className="absolute inset-0 rounded-full bg-emerald-400 opacity-0 animate-[pulse-ring_2s_ease-out_infinite]" />
                       {cfg.icon}
                     </div>
                   ) : (
                     <motion.div
-                      animate={status === "invalid" ? { x: [-4, 4, -4, 4, 0] } : {}}
+                      animate={status !== "expired" ? { x: [-4, 4, -4, 4, 0] } : {}}
                       transition={{ duration: 0.4, delay: 0.3 }}
                     >
                       {cfg.icon}
@@ -235,8 +271,55 @@ export default function VerifyResultPage({
                   <StatusPill status={status} className="mb-3 mx-auto" />
                   <h2 className="text-2xl font-display font-bold mb-2">{cfg.title}</h2>
                   <p className="text-[var(--text-secondary)] text-sm">{cfg.subtitle}</p>
+                  {result.message && status !== "verified" && (
+                    <p className="text-[var(--text-primary)] text-sm mt-3 font-medium">{result.message}</p>
+                  )}
                 </motion.div>
               </div>
+
+              {/* Recall details */}
+              {status === "recalled" && result.recall && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.28 }}
+                  className="card p-5 border border-rose-500/30 bg-rose-500/5"
+                >
+                  <div className="flex items-start gap-3">
+                    <Ban size={20} className="text-rose-500 shrink-0 mt-0.5" />
+                    <div className="text-sm space-y-1">
+                      <div className="font-semibold">Recall notice</div>
+                      <div>Reason: {result.recall.reason}</div>
+                      {result.recall.recalledAt && (
+                        <div className="text-xs text-[var(--text-tertiary)]">
+                          Recalled on {formatDateTime(result.recall.recalledAt)}
+                        </div>
+                      )}
+                      <div className="text-xs text-[var(--text-secondary)]">
+                        Return this medicine to the pharmacy or ask your pharmacist for advice.
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Unusual scan activity (possible copied QR code) */}
+              {result.scanWarning?.suspicious && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.29 }}
+                  className="card p-5 border border-amber-500/30 bg-amber-500/5"
+                >
+                  <div className="flex items-start gap-3">
+                    <ScanLine size={20} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div className="text-sm space-y-1">
+                      <div className="font-semibold">Unusual scan activity</div>
+                      <div className="text-[var(--text-secondary)]">{result.scanWarning.message}</div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
 
               {/* Medicine details */}
               {result.batch && (
@@ -264,12 +347,35 @@ export default function VerifyResultPage({
                       }
                     />
                     <DetailRow icon={<Package size={16} />} label="Quantity" value={`${result.batch.quantity.toLocaleString()} units`} />
+                    {result.currentHolder && (
+                      <DetailRow
+                        icon={<Building2 size={16} />}
+                        label="Current Holder"
+                        value={`${result.currentHolder.name || truncateAddr(result.currentHolder.address)} (${result.currentHolder.role})`}
+                      />
+                    )}
+                    {result.registration?.txHash && (
+                      <DetailRow
+                        icon={<ExternalLink size={16} />}
+                        label="Registration Transaction"
+                        value={
+                          <a
+                            href={getEtherscanUrl(result.registration.txHash)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[var(--accent)] hover:underline"
+                          >
+                            View on Etherscan
+                          </a>
+                        }
+                      />
+                    )}
                   </div>
                 </motion.div>
               )}
 
               {/* Transfer timeline */}
-              {result.custodyHistory && result.custodyHistory.length > 0 && (
+              {history.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -280,7 +386,7 @@ export default function VerifyResultPage({
                     Transfer History
                   </h3>
                   <div className="timeline">
-                    {result.custodyHistory.map((record, i) => (
+                    {history.map((record, i) => (
                       <motion.div
                         key={i}
                         initial={{ opacity: 0, x: -16 }}
@@ -291,7 +397,7 @@ export default function VerifyResultPage({
                         <div className="timeline-dot" />
                         <div className="flex flex-col gap-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {roleIcons[record.toRole]}
+                            {roleIcons[String(record.toRole)]}
                             <span className="text-sm font-semibold">
                               {record.toName ?? truncateAddr(record.to)}
                             </span>

@@ -11,6 +11,7 @@ router.get("/stats", c.stats);
 router.get("/batches", c.batches);
 router.get("/transfers", c.transfers);
 router.get("/transactions", c.transactions);
+router.get("/verifications/suspicious", c.suspiciousScans);
 router.get("/verifications", c.verifications);
 router.get("/sync", c.sync);
 router.post("/admins", validate(v.createAdmin), c.createAdmin);

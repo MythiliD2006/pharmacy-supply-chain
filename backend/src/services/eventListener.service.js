@@ -25,7 +25,7 @@ const WATCHED = [
   {
     source: "BatchRegistry",
     contract: contracts.registry,
-    events: ["BatchRegistered", "CustodyTransferred"],
+    events: ["BatchRegistered", "CustodyTransferred", "BatchRecalled"],
   },
   {
     source: "SupplyChainTransfer",

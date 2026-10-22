@@ -72,11 +72,16 @@ export function copyToClipboard(text: string): Promise<void> {
   return navigator.clipboard.writeText(text);
 }
 
-export function getEtherscanUrl(txHash: string, chainId = 11155111): string {
-  if (chainId === 11155111) {
-    return `https://sepolia.etherscan.io/tx/${txHash}`;
+// Uses the chain the app is configured for (NEXT_PUBLIC_CHAIN_ID).
+// A local Hardhat chain (31337) has no public explorer, so links point at Sepolia's.
+export function getEtherscanUrl(
+  txHash: string,
+  chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 11155111)
+): string {
+  if (chainId === 1) {
+    return `https://etherscan.io/tx/${txHash}`;
   }
-  return `https://etherscan.io/tx/${txHash}`;
+  return `https://sepolia.etherscan.io/tx/${txHash}`;
 }
 
 export function sleep(ms: number): Promise<void> {

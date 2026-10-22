@@ -19,7 +19,18 @@ module.exports = {
     query: Joi.object({
       scope: Joi.string().valid("holding", "manufactured", "all").default("holding"),
       search: Joi.string().trim().max(100).allow(""),
+      recalled: Joi.boolean(),
       ...pagination,
+    }),
+  },
+  recall: {
+    params: Joi.object({ batchId: batchId.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().min(3).max(300).required().messages({
+        "any.required": "A reason is required to recall a batch",
+        "string.empty": "A reason is required to recall a batch",
+        "string.min": "Reason must be at least 3 characters",
+      }),
     }),
   },
   batchIdParam: {

@@ -22,11 +22,18 @@ const batchSchema = new mongoose.Schema(
     registeredAt: { type: Date, default: null },
 
     holderEventPos: { type: Number, default: 0 },
+
+    // recall (copied from the BatchRecalled event; the blockchain is the source of truth)
+    recalled: { type: Boolean, default: false },
+    recallReason: { type: String, default: "" },
+    recalledAt: { type: Date, default: null },
+    recallTxHash: { type: String, default: null },
   },
   { timestamps: true }
 );
 
 batchSchema.index({ currentHolder: 1, chainStatus: 1 });
 batchSchema.index({ manufacturer: 1, chainStatus: 1 });
+batchSchema.index({ recalled: 1 });
 
 module.exports = mongoose.model("Batch", batchSchema);

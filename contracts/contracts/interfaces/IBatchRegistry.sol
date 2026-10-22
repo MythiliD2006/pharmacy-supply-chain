@@ -10,6 +10,8 @@ interface IBatchRegistry {
 
     function isExpired(string calldata batchId) external view returns (bool);
 
+    function isRecalled(string calldata batchId) external view returns (bool);
+
     function recordTransfer(
         string calldata batchId,
         address from,

@@ -36,6 +36,13 @@ contract BatchRegistry is IBatchRegistry {
         address currentHolder;
         IAccessControlManager.Role currentHolderRole;
         uint256 transferCount;
+        bool recalled;
+    }
+
+    struct RecallInfo {
+        bool recalled;
+        string reason;
+        uint256 recalledAt;
     }
 
     IAccessControlManager public immutable accessControl;
@@ -44,6 +51,8 @@ contract BatchRegistry is IBatchRegistry {
     mapping(bytes32 => Batch) private batches;
     mapping(bytes32 => CustodyRecord[]) private custody;
     string[] private batchIds;
+    mapping(bytes32 => RecallInfo) private recalls;
+    uint256 public recalledCount;
 
     event BatchRegistered(
         string batchId,
@@ -55,6 +64,7 @@ contract BatchRegistry is IBatchRegistry {
     );
     event CustodyTransferred(string batchId, bytes32 indexed batchKey, address indexed from, address indexed to);
     event TransferContractSet(address transferContract);
+    event BatchRecalled(string batchId, bytes32 indexed batchKey, address indexed manufacturer, string reason);
 
     error NotAdmin();
     error NotManufacturer();
@@ -64,6 +74,9 @@ contract BatchRegistry is IBatchRegistry {
     error BatchNotFound();
     error InvalidBatchData();
     error ZeroAddress();
+    error NotBatchManufacturer();
+    error AlreadyRecalled();
+    error EmptyReason();
 
     constructor(address accessControlAddress) {
         if (accessControlAddress == address(0)) revert ZeroAddress();
@@ -118,6 +131,23 @@ contract BatchRegistry is IBatchRegistry {
         emit BatchRegistered(batchId, key, msg.sender, medicineName, expiryDate, quantity);
     }
 
+    /// @notice The manufacturer withdraws a batch. Once recalled it can never be
+    ///         transferred again, and every customer scan shows it as recalled.
+    function recallBatch(string calldata batchId, string calldata reason) external {
+        bytes32 key = _key(batchId);
+        Batch storage b = batches[key];
+        if (b.registeredAt == 0) revert BatchNotFound();
+        if (msg.sender != b.manufacturer) revert NotBatchManufacturer();
+        if (!accessControl.isActive(msg.sender)) revert NotManufacturer();
+        if (bytes(reason).length == 0) revert EmptyReason();
+        if (recalls[key].recalled) revert AlreadyRecalled();
+
+        recalls[key] = RecallInfo(true, reason, block.timestamp);
+        recalledCount++;
+
+        emit BatchRecalled(batchId, key, msg.sender, reason);
+    }
+
     /// @dev Called only by SupplyChainTransfer once the receiver confirms.
     function recordTransfer(
         string calldata batchId,
@@ -161,6 +191,14 @@ contract BatchRegistry is IBatchRegistry {
         return b.registeredAt != 0 && block.timestamp > b.expiryDate;
     }
 
+    function isRecalled(string calldata batchId) public view override returns (bool) {
+        return recalls[_key(batchId)].recalled;
+    }
+
+    function getRecall(string calldata batchId) external view returns (RecallInfo memory) {
+        return recalls[_key(batchId)];
+    }
+
     /// @notice Everything the customer verification page needs in one call.
     function verifyBatch(string calldata batchId) external view returns (VerificationResult memory result) {
         bytes32 key = _key(batchId);
@@ -177,6 +215,7 @@ contract BatchRegistry is IBatchRegistry {
             ? IAccessControlManager.Role.Manufacturer
             : log[log.length - 1].toRole;
         result.transferCount = log.length;
+        result.recalled = recalls[key].recalled;
     }
 
     /// @notice Checks the dataHash stored on-chain against one computed from the DB record.

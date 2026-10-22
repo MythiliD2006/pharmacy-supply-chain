@@ -8,24 +8,15 @@ import {
   RefreshCw
 } from "lucide-react";
 import Link from "next/link";
-import { batchApi, Batch } from "@/lib/api";
+import { batchApi, Batch, getErrorMessage } from "@/lib/api";
+import { toast } from "sonner";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { HashChip } from "@/components/ui/HashChip";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { formatDate, isExpired } from "@/lib/utils";
 
-const DEMO_BATCHES: Batch[] = Array.from({ length: 12 }, (_, i) => ({
-  _id: String(i),
-  batchId: `BATCH-2024-${String(i + 1).padStart(4, "0")}`,
-  medicineName: ["Amoxicillin 500mg", "Paracetamol 650mg", "Azithromycin 250mg", "Ibuprofen 400mg", "Metformin 500mg"][i % 5],
-  manufacturer: `0x${Math.random().toString(16).slice(2, 42)}`,
-  manufacturingDate: new Date(Date.now() - (i + 1) * 30 * 86400000).toISOString(),
-  expiryDate: new Date(Date.now() + (i % 3 === 0 ? -5 : (i + 1) * 60) * 86400000).toISOString(),
-  quantity: Math.floor(1000 + Math.random() * 20000),
-  status: i % 5 === 0 ? "expired" : i % 7 === 0 ? "invalid" : "genuine",
-}));
-
-function getBatchStatus(batch: Batch): "genuine" | "expired" | "invalid" {
+function getBatchStatus(batch: Batch): "genuine" | "expired" | "invalid" | "recalled" {
+  if (batch.recalled) return "recalled";
   if (batch.status) return batch.status as "genuine" | "expired" | "invalid";
   if (isExpired(batch.expiryDate)) return "expired";
   return "genuine";
@@ -49,9 +40,11 @@ export default function BatchesPage() {
       } else {
         setBatches([]);
       }
-    } catch {
-      setBatches(DEMO_BATCHES);
-      setTotal(DEMO_BATCHES.length);
+    } catch (err) {
+      // never show placeholder data here: this list must reflect the blockchain
+      toast.error(getErrorMessage(err, "Failed to load batches"));
+      setBatches([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
